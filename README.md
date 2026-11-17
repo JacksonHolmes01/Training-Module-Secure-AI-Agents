@@ -16,9 +16,9 @@ It is written for beginners. Everything runs on your own computer with Docker, u
 | 2 | [part-2-attack-agent](part-2-attack-agent/README.md) | Make the agent email data out, hand data to a malicious tool, read files it must not, and serve a user more than they may see | Available |
 | 3 | [part-3-defend-agent](part-3-defend-agent/README.md) | Confine tools, control the exits, approve tools, act as the user: six defenses, each measured until the attacks stop | Available |
 | 4 | [part-4-contain-agent](part-4-contain-agent/README.md) | A sandbox for the code tool, least-privilege containers with an audit, and network egress control: contain the blast radius | Available |
-| 5 | part-5-monitor-agent | An audit log of every action, detection rules, and a red-team campaign | Planned |
+| 5 | [part-5-monitor-agent](part-5-monitor-agent/README.md) | A security log of every tool call, detection rules for the attack signatures, and a red-team campaign scored for coverage | Available |
 
-Do the parts in order. Each one builds on the last.
+Do the parts in order. Each one builds on the last. All five parts are available.
 
 ---
 

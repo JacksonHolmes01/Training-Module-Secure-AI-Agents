@@ -1,0 +1,130 @@
+[
+  {
+    "id": "A1",
+    "name": "Email to an outside address",
+    "enabled": true,
+    "severity": "high",
+    "match": {
+      "event": "tool_call",
+      "tool": "send_email",
+      "summary.external": true
+    },
+    "group_by": "user",
+    "threshold": 1,
+    "window_s": 5,
+    "why": "The agent tried to email a domain outside the company. This is the signature of data exfiltration by email.",
+    "response": "Read the blocked event. Confirm no customer data left, and look at what the agent was asked to do just before."
+  },
+  {
+    "id": "A2",
+    "name": "Tool call blocked by policy",
+    "enabled": true,
+    "severity": "medium",
+    "match": {
+      "event": "tool_call",
+      "decision": "blocked"
+    },
+    "group_by": "user",
+    "threshold": 1,
+    "window_s": 30,
+    "why": "A defense refused a tool call. A single block is worth a look; a burst is someone probing what they can do.",
+    "response": "Read the reason on the event. Repeated blocks from one user suggest a compromised session or an injection."
+  },
+  {
+    "id": "A3",
+    "name": "Unapproved (outside) tool used",
+    "enabled": true,
+    "severity": "high",
+    "match": {
+      "event": "tool_call",
+      "builtin": false
+    },
+    "group_by": "user",
+    "threshold": 1,
+    "window_s": 5,
+    "why": "The agent called a tool that did not ship with it, meaning one loaded from an outside plugin server.",
+    "response": "Check which plugin the tool came from and what it did with the arguments it received."
+  },
+  {
+    "id": "A4",
+    "name": "File path left the workspace",
+    "enabled": true,
+    "severity": "high",
+    "match": {
+      "event": "tool_call",
+      "tool": "read_file",
+      "summary.escapes_workspace": true
+    },
+    "group_by": "user",
+    "threshold": 1,
+    "window_s": 5,
+    "why": "A file read used a path that points outside the workspace: a path-traversal attempt.",
+    "response": "A legitimate request never needs '..' or an absolute path. Treat as an attack."
+  },
+  {
+    "id": "A5",
+    "name": "Agent ran code",
+    "enabled": true,
+    "severity": "medium",
+    "match": {
+      "event": "tool_call",
+      "tool": "run_python"
+    },
+    "group_by": "user",
+    "threshold": 1,
+    "window_s": 5,
+    "why": "The agent executed code. Code execution is the most powerful tool; every use is worth recording.",
+    "response": "Confirm the code ran in the sandbox. Review what the snippet was asked to compute."
+  },
+  {
+    "id": "A6",
+    "name": "Burst of tool calls in one chat",
+    "enabled": true,
+    "severity": "medium",
+    "match": {
+      "event": "chat"
+    },
+    "group_by": "user",
+    "threshold": 1,
+    "window_s": 60,
+    "min_field": [
+      "tool_calls",
+      5
+    ],
+    "why": "One request drove an unusually long run of tool calls, which can mean a loop or an agent being driven by an attacker.",
+    "response": "Read the chat's tool list. A long, repetitive run is the signature of excessive agency."
+  },
+  {
+    "id": "A7",
+    "name": "Junior user read customer contacts",
+    "enabled": false,
+    "severity": "high",
+    "match": {
+      "event": "tool_call",
+      "tool": "query_db",
+      "summary.selects_contact": true,
+      "user": "bob"
+    },
+    "group_by": "user",
+    "threshold": 1,
+    "window_s": 300,
+    "why": "A junior user's session queried customer contact details. Starts disabled: it is noisy if juniors legitimately handle their own accounts.",
+    "response": "Confirm per-user data access is on, so the query only returned the user's own accounts."
+  },
+  {
+    "id": "A8",
+    "name": "Blocked web fetch",
+    "enabled": true,
+    "severity": "high",
+    "match": {
+      "event": "tool_call",
+      "tool": "fetch_url",
+      "decision": "blocked"
+    },
+    "group_by": "user",
+    "threshold": 1,
+    "window_s": 5,
+    "why": "The agent tried to fetch a host that is not on the allowlist, a sign of an exfiltration or recon attempt through a URL.",
+    "response": "Check the host in the event. A blocked fetch to an unknown host during a normal task points to an injection."
+  }
+]
