@@ -14,7 +14,7 @@ It is written for beginners. Everything runs on your own computer with Docker, u
 |---|---|---|---|
 | 1 | [part-1-build-agent](part-1-build-agent/README.md) | Build HelpBot, an agent with six tools, and see exactly how a model calls tools | Available |
 | 2 | [part-2-attack-agent](part-2-attack-agent/README.md) | Make the agent email data out, hand data to a malicious tool, read files it must not, and serve a user more than they may see | Available |
-| 3 | part-3-defend-agent | Tool allowlists, argument checks, human approval, and per-user permissions, each measured | Planned |
+| 3 | [part-3-defend-agent](part-3-defend-agent/README.md) | Confine tools, control the exits, approve tools, act as the user: six defenses, each measured until the attacks stop | Available |
 | 4 | part-4-contain-agent | An outbound allowlist, a sandbox for risky tools, and hardened containers, so even a fooled agent is stuck | Planned |
 | 5 | part-5-monitor-agent | An audit log of every action, detection rules, and a red-team campaign | Planned |
 
