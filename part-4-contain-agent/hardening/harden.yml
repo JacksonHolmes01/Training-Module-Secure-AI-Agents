@@ -1,0 +1,66 @@
+# Part 4 hardening overlay. Applied on top of docker-compose.yml by bin/harden.sh.
+# Every container drops all Linux capabilities, blocks privilege escalation,
+# and caps its process count. The agent and the Python helpers also run as a
+# non-root user with a read-only filesystem. Images are pinned by digest.
+x-locked: &locked
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  agent-api:
+    <<: *locked
+    build:
+      args:
+        BASE_IMAGE: "python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+    user: "10001:10001"
+    read_only: true
+    pids_limit: 256
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+
+  sandbox:
+    build:
+      args:
+        BASE_IMAGE: "python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+
+  gradio-ui:
+    <<: *locked
+    build:
+      args:
+        BASE_IMAGE: "python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+    user: "10001:10001"
+    pids_limit: 256
+    environment:
+      HOME: /tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+
+  external-site:
+    <<: *locked
+    image: "python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+    user: "10001:10001"
+    read_only: true
+    pids_limit: 64
+
+  nginx:
+    <<: *locked
+    image: nginxinc/nginx-unprivileged:1.28.2-alpine
+    pids_limit: 128
+
+  intranet-site:
+    <<: *locked
+    image: nginxinc/nginx-unprivileged:1.28.2-alpine
+    pids_limit: 64
+
+  mailpit:
+    image: "axllent/mailpit@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498"
+    pids_limit: 64
+
+  ollama:
+    image: "ollama/ollama@sha256:265409e1d931028a8f7d5a32bcbafddd7bffbc6cc629d77efe9560adf692a5e7"
+    pids_limit: 256
+
+  pgvector:
+    image: "pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f"
+    pids_limit: 256

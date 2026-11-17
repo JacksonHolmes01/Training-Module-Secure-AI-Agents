@@ -1,0 +1,51 @@
+# NGINX edge gateway.
+# Each person has their own API key. NGINX turns the key into a user name
+# and passes it to the API in X-Lab-User. A request with an unknown key
+# never reaches the API.
+#
+# ${ALICE_API_KEY}, ${BOB_API_KEY}, and ${INTERNAL_API_KEY} are filled in
+# from the environment when the container starts.
+
+map $http_x_api_key $lab_user {
+    default               "";
+    "${ALICE_API_KEY}"    alice;
+    "${BOB_API_KEY}"      bob;
+}
+
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+
+server {
+    listen 8088;
+    server_tokens off;
+    client_max_body_size 1m;
+
+    location = /proxy-health {
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        default_type application/json;
+        if ($http_x_api_key = "") {
+            return 401 '{"error":"missing X-API-Key header"}';
+        }
+        if ($lab_user = "") {
+            return 403 '{"error":"invalid API key"}';
+        }
+
+        limit_req zone=api_limit burst=20 nodelay;
+        limit_req_status 429;
+
+        # An agent can take several model calls per request on a laptop CPU
+        proxy_connect_timeout 30s;
+        proxy_send_timeout    600s;
+        proxy_read_timeout    600s;
+
+        proxy_pass http://agent-api:8000;
+        proxy_set_header Host           $host;
+        # Set by NGINX, never taken from the caller: a client cannot claim to be someone else
+        proxy_set_header X-Lab-User     $lab_user;
+        proxy_set_header X-Internal-Key "${INTERNAL_API_KEY}";
+        proxy_set_header X-API-Key      "";
+    }
+}

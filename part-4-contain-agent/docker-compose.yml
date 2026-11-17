@@ -1,0 +1,254 @@
+# Fixed project name, so this lab's containers, volumes, and networks
+# never collide with another lab that uses the same folder name.
+name: secure-ai-agents-part4
+
+services:
+  # -------------------------------------------------------------------
+  # PostgreSQL + pgvector: the knowledge base and the customer database
+  # -------------------------------------------------------------------
+  pgvector:
+    image: pgvector/pgvector:0.8.6-pg17-bookworm
+    container_name: agent-db
+    restart: unless-stopped
+    mem_limit: 1g
+    pids_limit: 256
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_DB: "agentlab"
+      POSTGRES_PASSWORD_FILE: "/run/secrets/postgres_password"
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+      EMBED_DIM: "768"
+    secrets:
+      - postgres_password
+      - kb_ingest_password
+      - agent_app_password
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agentlab"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - internal
+
+  # -------------------------------------------------------------------
+  # Ollama: the model that decides which tools to call, plus embeddings
+  # -------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:0.40.6
+    container_name: agent-ollama
+    restart: unless-stopped
+    mem_limit: 5g
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - internal
+
+  # -------------------------------------------------------------------
+  # The agent: FastAPI app with the agent loop and its tools
+  # -------------------------------------------------------------------
+  agent-api:
+    build:
+      context: ./agent-api
+    container_name: agent-api
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      DB_HOST: "pgvector"
+      DB_NAME: "agentlab"
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      AGENT_MODEL: "${AGENT_MODEL:-qwen2.5:3b}"
+      OLLAMA_EMBED_MODEL: "${OLLAMA_EMBED_MODEL:-nomic-embed-text}"
+      AGENT_MAX_STEPS: "${AGENT_MAX_STEPS:-6}"
+      OLLAMA_TEMPERATURE: "${OLLAMA_TEMPERATURE:-0}"
+      WORKSPACE_DIR: "/workspace"
+      PLUGIN_URLS: "${PLUGIN_URLS:-}"
+      # Defenses (Part 3). All OFF by default, so the agent starts as in Part 2.
+      # bin/defend.sh flips these and restarts the agent.
+      DEFEND_PATHS: "${DEFEND_PATHS:-false}"
+      DEFEND_EMAIL: "${DEFEND_EMAIL:-false}"
+      DEFEND_URL: "${DEFEND_URL:-false}"
+      DEFEND_TOOLS: "${DEFEND_TOOLS:-false}"
+      DEFEND_DATA: "${DEFEND_DATA:-false}"
+      DEFEND_APPROVAL: "${DEFEND_APPROVAL:-false}"
+      DEFEND_SPOTLIGHT: "${DEFEND_SPOTLIGHT:-false}"
+      SANDBOX_CODE: "${SANDBOX_CODE:-false}"
+      SANDBOX_DIR: "/sandbox"
+      SENIOR_USERS: "alice"
+      SMTP_HOST: "mailpit"
+      SMTP_PORT: "1025"
+    secrets:
+      - kb_ingest_password
+      - agent_app_password
+      - internal_api_key
+    volumes:
+      # The team's shared folder, which the read_file tool reads from
+      - ./workspace:/workspace:ro
+      # The drop folder the agent uses to hand code to the sandbox container
+      - sandbox_queue:/sandbox
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - internal
+      - outside
+
+  # -------------------------------------------------------------------
+  # NGINX: the only way in. Turns each person's API key into a user name.
+  # -------------------------------------------------------------------
+  nginx:
+    image: nginx:1.28-alpine
+    container_name: agent-nginx
+    restart: unless-stopped
+    mem_limit: 128m
+    ports:
+      - "127.0.0.1:8088:8088"
+    environment:
+      ALICE_API_KEY: "${ALICE_API_KEY:?Run bin/setup_secrets.sh first}"
+      BOB_API_KEY: "${BOB_API_KEY:?Run bin/setup_secrets.sh first}"
+      INTERNAL_API_KEY: "${INTERNAL_API_KEY:?Run bin/setup_secrets.sh first}"
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+    depends_on:
+      agent-api:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # -------------------------------------------------------------------
+  # Gradio chat UI: pick who you are, chat, and see every tool call
+  # -------------------------------------------------------------------
+  gradio-ui:
+    build:
+      context: ./gradio-ui
+    container_name: agent-ui
+    restart: unless-stopped
+    mem_limit: 512m
+    ports:
+      - "127.0.0.1:7860:7860"
+    environment:
+      API_BASE_URL: "http://nginx:8088"
+      ALICE_API_KEY: "${ALICE_API_KEY:?Run bin/setup_secrets.sh first}"
+      BOB_API_KEY: "${BOB_API_KEY:?Run bin/setup_secrets.sh first}"
+    depends_on:
+      nginx:
+        condition: service_started
+    networks:
+      - internal
+
+  # -------------------------------------------------------------------
+  # Mailpit: a fake mail server. Every email the agent "sends" lands here,
+  # in a web inbox at http://localhost:8025. Nothing ever leaves.
+  # -------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:v1.32.0
+    container_name: agent-mailpit
+    restart: unless-stopped
+    mem_limit: 128m
+    ports:
+      - "127.0.0.1:8025:8025"
+    networks:
+      - internal
+
+  # -------------------------------------------------------------------
+  # Two websites the agent can fetch:
+  #   intranet.local      the company wiki (inside)
+  #   partner-news.example and evil.example   the outside internet,
+  #                       which records every request it receives
+  # -------------------------------------------------------------------
+  intranet-site:
+    image: nginx:1.28-alpine
+    container_name: agent-intranet
+    restart: unless-stopped
+    mem_limit: 64m
+    volumes:
+      - ./sites/intranet:/usr/share/nginx/html:ro
+    networks:
+      internal:
+        aliases: [intranet.local]
+
+  external-site:
+    image: python:3.12-slim
+    container_name: agent-external
+    restart: unless-stopped
+    mem_limit: 64m
+    command: ["python", "/site/server.py"]
+    volumes:
+      - ./sites/external:/site:ro
+    networks:
+      outside:
+        aliases: [partner-news.example, evil.example]
+
+  # -------------------------------------------------------------------
+  # Code sandbox: runs the agent's run_python snippets in isolation.
+  # No network, read-only root, non-root user, tiny memory and process
+  # limits. It exchanges code and results with the agent through one
+  # shared folder and holds none of the agent's secrets.
+  # -------------------------------------------------------------------
+  # One-shot: hand the shared queue folder to the sandbox's user, then exit.
+  sandbox-perms:
+    image: python:3.12-slim
+    container_name: agent-sandbox-perms
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["sh", "-c", "mkdir -p /sandbox/in /sandbox/out && chown -R 10001:10001 /sandbox && echo 'sandbox queue ready'"]
+    network_mode: none
+    volumes:
+      - sandbox_queue:/sandbox
+
+  sandbox:
+    build:
+      context: ./sandbox
+    container_name: agent-sandbox
+    restart: unless-stopped
+    user: "10001:10001"
+    network_mode: none          # the sandbox has NO network at all
+    read_only: true             # its own filesystem cannot be changed
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 64
+    cpus: 1.0
+    tmpfs:
+      - /tmp:noexec,nosuid,size=32m
+      - /work:nosuid,size=32m,uid=10001,gid=10001
+    volumes:
+      - sandbox_queue:/sandbox
+    depends_on:
+      sandbox-perms:
+        condition: service_completed_successfully
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  kb_ingest_password:
+    file: ./secrets/kb_ingest_password.txt
+  agent_app_password:
+    file: ./secrets/agent_app_password.txt
+  internal_api_key:
+    file: ./secrets/internal_api_key.txt
+
+networks:
+  internal:
+    driver: bridge
+  # Stands in for the internet: only the agent and the outside site are on it
+  outside:
+    driver: bridge
+
+volumes:
+  db_data:
+  # Code and results pass between the agent and the sandbox through this volume
+  sandbox_queue:
+  # The models are about 2 GB. Parts 1 to 5 share one download.
+  ollama_data:
+    name: secure-ai-agents_ollama_data
+    external: true
